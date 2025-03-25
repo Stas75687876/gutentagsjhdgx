@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import { CartItem } from '../../components/shop/CartProvider';
-import { loadStripe } from '@stripe/stripe-js';
+import { prepareStorageForStripe, initializeStripeWithStorage } from '@/lib/stripe-storage-helper';
 
 // Typ-Definitionen für die Zahlungsmethode
 interface PaymentMethod {
@@ -28,6 +28,47 @@ interface FormData {
   notes: string;
 }
 
+// Neue Hilfsfunktion zum Bereinigen des LocalStorage
+const cleanupStorage = () => {
+  try {
+    // Wichtige Schlüssel, die nicht gelöscht werden sollen
+    const keysToKeep = [
+      'cart',             // Warenkorb
+      'checkout-session', // Aktuelle Checkout-Session
+      'user',             // Benutzerdaten
+      'theme'             // Theme-Einstellung
+    ];
+    
+    // Alle LocalStorage-Schlüssel durchgehen
+    const itemsToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && !keysToKeep.some(k => key.includes(k))) {
+        // Nur Schlüssel speichern, die nicht in der Liste zum Behalten sind
+        itemsToRemove.push(key);
+      }
+    }
+    
+    // Identifizierte Elemente löschen
+    itemsToRemove.forEach(key => {
+      localStorage.removeItem(key);
+    });
+    
+    console.log(`[Storage Cleanup] ${itemsToRemove.length} unnötige Einträge entfernt`);
+    
+    // Fallback: Wenn trotzdem zu wenig Speicher, Session Storage leeren
+    if (itemsToRemove.length === 0) {
+      sessionStorage.clear();
+      console.log('[Storage Cleanup] Session Storage geleert');
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('[Storage Cleanup] Fehler:', err);
+    return false;
+  }
+};
+
 export default function CheckoutPage() {
   const router = useRouter();
   const { cart, clearCart, totalPrice } = useCart();
@@ -41,7 +82,7 @@ export default function CheckoutPage() {
     country: 'DE',
     notes: ''
   });
-  const [loading, setLoading] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [availablePaymentMethods, setAvailablePaymentMethods] = React.useState<string[]>(['card']);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = React.useState<string>('card');
@@ -205,6 +246,12 @@ export default function CheckoutPage() {
     }
   ];
 
+  // Stripe Storage-Optimierung bei Komponenteninitialisierung ausführen
+  React.useEffect(() => {
+    // Speicher für Stripe vorbereiten
+    prepareStorageForStripe();
+  }, []);
+
   React.useEffect(() => {
     // Leerer Warenkorb, zur Startseite zurückleiten
     if (cart.length === 0) {
@@ -238,12 +285,15 @@ export default function CheckoutPage() {
     setFormData((prev: FormData) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setLoading(true);
+    setIsLoading(true);
     setError(null);
 
     try {
+      // Optimiere Speicher vor Stripe-Operationen
+      initializeStripeWithStorage();
+      
       // Validiere das Bild-URL für jeden Artikel im Warenkorb
       const cartItemsWithValidImages = cart.map((item: CartItem) => {
         let validImage = item.image;
@@ -280,6 +330,9 @@ export default function CheckoutPage() {
         notes: formData.notes
       };
       
+      // Vor dem Stripe-Checkout den Speicher bereinigen
+      cleanupStorage();
+      
       // Erstelle die Checkout-Session mit den validierten Bildern
       const response = await fetch('/api/checkout', {
         method: 'POST',
@@ -305,9 +358,9 @@ export default function CheckoutPage() {
       window.location.href = data.url;
     } catch (err: any) {
       console.error('Checkout-Fehler:', err);
-      setError(err.message);
+      setError('Ein Fehler ist aufgetreten. Bitte versuchen Sie es erneut.');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
@@ -484,7 +537,7 @@ export default function CheckoutPage() {
                 <div className="bg-white dark:bg-gray-800 rounded-lg mt-8">
                   <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white pb-2 border-b dark:border-gray-700">Zahlungsmethoden</h2>
                   
-                  {loading ? (
+                  {isLoading ? (
                     <div className="flex justify-center items-center py-4">
                       <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
                     </div>
@@ -538,14 +591,14 @@ export default function CheckoutPage() {
                 <div className="pt-4">
                   <button
                     type="submit"
-                    disabled={loading}
+                    disabled={isLoading}
                     className={`w-full py-3 px-4 rounded-md font-medium text-white transition-colors duration-300
-                      ${loading 
+                      ${isLoading 
                         ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed' 
                         : 'bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800'
                       }`}
                   >
-                    {loading ? (
+                    {isLoading ? (
                       <div className="flex justify-center items-center">
                         <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
                         Verarbeite...
