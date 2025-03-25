@@ -1,5 +1,0 @@
-import React, { useState, useEffect } from 'react'; 
-import Image from 'next/image'; 
-import Link from 'next/link'; 
-import ShopLayout from '../../../components/ShopLayout'; 
-import { useCart } from '../../../components/shop/CartProvider'; 
